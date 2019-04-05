@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import os
+import json
+import pickle
+import sys
+import traceback
+
+import pandas as pd
+
+from deep_factorization import DeepFactorization
+
+# These are the paths to where SageMaker mounts interesting things in your container.
+
+prefix = '/opt/ml/'
+
+input_path = prefix + 'input/data'
+output_path = os.path.join(prefix, 'output')
+model_path = os.path.join(prefix, 'model')
+param_path = os.path.join(prefix, 'input/config/hyperparameters.json')
+
+# This algorithm has a single channel of input data called 'training'. Since we run in
+# File mode, the input files are copied to the directory specified here.
+training_channel = 'training'
+training_path = os.path.join(input_path, training_channel)
+
+validation_channel = 'validation'
+validation_path = os.path.join(input_path, validation_channel)
+
+# The function to execute the training.
+def train():
+    print('Starting the training.')
+    try:
+        # Read in any hyperparameters that the user passed with the training job
+        with open(param_path, 'r') as tc:
+            trainingParams = json.load(tc)
+
+        # Take the set of training files and read them all into a single pandas dataframe
+        input_files_training = [ os.path.join(training_path, file) for file in os.listdir(training_path) ]
+        if len(input_files_training) == 0:
+            raise ValueError(('There are no files in {}.\n' +
+                              'This usually indicates that the channel ({}) was incorrectly specified,\n' +
+                              'the data specification in S3 was incorrectly specified or the role specified\n' +
+                              'does not have permission to access the data.').format(training_path, training_channel))
+
+        raw_data = [ pd.read_csv(file, header=None) for file in input_files_training ]
+        df_train = pd.concat(raw_data)
+
+        # Take the set of validation files and read them all into a single pandas dataframe
+        input_files_validation = [ os.path.join(validation_path, file) for file in os.listdir(validation_path) ]
+        if len(input_files_validation) == 0:
+            raise ValueError(('There are no files in {}.\n' +
+                              'This usually indicates that the channel ({}) was incorrectly specified,\n' +
+                              'the data specification in S3 was incorrectly specified or the role specified\n' +
+                              'does not have permission to access the data.').format(validation_path, validation_channel))
+
+        raw_data_validation = [ pd.read_csv(file, header=None) for file in input_files_validation ]
+        df_val = pd.concat(raw_data_validation)
+
+        # Here we only support a single hyperparameter. Note that hyperparameters are always passed in as
+        # strings, so we need to do any necessary conversions.
+        rank = trainingParams.get('rank', None)
+        if rank is not None:
+            rank = int(rank)
+
+        n_hidden = trainingParams.get('n_hidden', None)
+        if n_hidden is not None:
+            n_hidden = int(n_hidden)
+
+        n_user = df_train.iloc[:, 0].max()
+        n_movie = df_train.iloc[:, 1].max()
+
+        print(n_user)
+        print(n_movie)
+        print(type(n_user))
+        print(type(n_movie))
+
+        x_train = [list(df_train.iloc[:, 0]), list(df_train.iloc[:, 1])]
+        y_train = list(df_train.iloc[:, 2])
+
+        x_val = [list(df_val.iloc[:, 0]), list(df_val.iloc[:, 1])]
+        y_val = list(df_val.iloc[:, 2])
+
+        # Now use the keras DeepFactorization model
+        model = DeepFactorization(n_user, n_movie, rank, n_hidden)
+        model.train(x_train, y_train, epochs=1, verbose=1, batch_size=1000)
+
+        mse = model.evaluate(x_val, y_val)
+
+        print("mse: {}".format(mse))
+
+        # save the model
+        model.save_model(model_path, 'deep_factorization')
+
+        print('Training complete.')
+    except Exception as e:
+        # Write out an error file. This will be returned as the failureReason in the
+        # DescribeTrainingJob result.
+        trc = traceback.format_exc()
+        with open(os.path.join(output_path, 'failure'), 'w') as s:
+            s.write('Exception during training: ' + str(e) + '\n' + trc)
+        # Printing this causes the exception to be in the training job logs, as well.
+        print('Exception during training: ' + str(e) + '\n' + trc, file=sys.stderr)
+        # A non-zero exit code causes the training job to be marked as Failed.
+        sys.exit(255)
+
+if __name__ == '__main__':
+    train()
+
+    # A zero exit code causes the job to be marked a Succeeded.
+    sys.exit(0)
