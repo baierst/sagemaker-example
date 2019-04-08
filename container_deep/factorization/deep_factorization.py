@@ -1,5 +1,6 @@
 import keras
 from keras.layers import Dense, Concatenate
+from keras.callbacks import EarlyStopping
 import json
 import os
 
@@ -70,7 +71,7 @@ class DeepFactorization:
             keras.model -- Keras model loaded from file.
         """
 
-        with open(os.path.join(model_path, '{model_name}.json'.format(model_name=model_name), 'r')) as fp:
+        with open(os.path.join(model_path, '{model_name}.json'.format(model_name=model_name)), 'r') as fp:
             model_params = json.load(fp)
 
         model = DeepFactorization(**model_params)
@@ -135,8 +136,9 @@ class DeepFactorization:
         Returns:
             keras.callbacks.History -- History of the training
         """
+        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=2)
 
-        history = self.model.fit(train_x, train_y, **keras_params)
+        history = self.model.fit(train_x, train_y, validation_split=0.1, callbacks=[es], **keras_params)
 
         return history
 

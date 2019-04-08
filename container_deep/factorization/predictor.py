@@ -20,6 +20,8 @@ from deep_factorization import DeepFactorization
 prefix = '/opt/ml/'
 model_path = os.path.join(prefix, 'model')
 
+print(os.listdir(model_path))
+
 # A singleton for holding the model. This simply loads the model and holds it.
 # It has a predict function that does a prediction based on the model and the input data.
 

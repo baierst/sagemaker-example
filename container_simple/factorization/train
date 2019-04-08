@@ -4,12 +4,13 @@ from __future__ import print_function
 
 import os
 import json
-import pickle
 import sys
 import traceback
 
 import pandas as pd
+import numpy as np
 
+from sklearn.preprocessing import StandardScaler
 from simple_factorization import SimpleFactorization
 
 # These are the paths to where SageMaker mounts things in your container.
@@ -20,6 +21,7 @@ input_path = prefix + 'input/data'
 output_path = os.path.join(prefix, 'output')
 model_path = os.path.join(prefix, 'model')
 param_path = os.path.join(prefix, 'input/config/hyperparameters.json')
+
 
 # This algorithm has a single channel of input data called 'training'. Since we run in
 # File mode, the input files are copied to the directory specified here.
@@ -61,6 +63,11 @@ def train():
 
         # Here we only support a single hyperparameter. Note that hyperparameters are always passed in as
         # strings, so we need to do any necessary conversions.
+
+        n_epochs = trainingParams.get('n_epochs', None)
+        if n_epochs is not None:
+            n_epochs = int(n_epochs)
+
         rank = trainingParams.get('rank', None)
         if rank is not None:
             rank = int(rank)
@@ -71,12 +78,18 @@ def train():
         x_train = [list(df_train.iloc[:, 0]), list(df_train.iloc[:, 1])]
         y_train = list(df_train.iloc[:, 2])
 
+        scaler = StandardScaler()
+        scaler.fit(np.array(y_train).reshape(-1, 1))
+        y_train = scaler.transform(np.array(y_train).reshape(-1, 1)).flatten().tolist()
+
         x_val = [list(df_val.iloc[:, 0]), list(df_val.iloc[:, 1])]
         y_val = list(df_val.iloc[:, 2])
 
+        y_val = scaler.transform(np.array(y_val).reshape(-1, 1)).flatten().tolist()
+
         # Now use the keras SimpleFactorization model.
         model = SimpleFactorization(n_user, n_movie, rank)
-        model.train(x_train, y_train, epochs=1, verbose=1, batch_size=1000)
+        model.train(x_train, y_train, epochs=n_epochs, verbose=1, batch_size=1000)
 
         mse = model.evaluate(x_val, y_val)
 

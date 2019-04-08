@@ -4,13 +4,14 @@ from __future__ import print_function
 
 import os
 import json
-import pickle
 import sys
 import traceback
 
 import pandas as pd
+import numpy as np
 
 from deep_factorization import DeepFactorization
+from sklearn.preprocessing import StandardScaler
 
 # These are the paths to where SageMaker mounts interesting things in your container.
 
@@ -45,22 +46,26 @@ def train():
                               'the data specification in S3 was incorrectly specified or the role specified\n' +
                               'does not have permission to access the data.').format(training_path, training_channel))
 
-        raw_data = [ pd.read_csv(file, header=None) for file in input_files_training ]
+        raw_data = [pd.read_csv(file, header=None) for file in input_files_training]
         df_train = pd.concat(raw_data)
 
         # Take the set of validation files and read them all into a single pandas dataframe
-        input_files_validation = [ os.path.join(validation_path, file) for file in os.listdir(validation_path) ]
+        input_files_validation = [os.path.join(validation_path, file) for file in os.listdir(validation_path)]
         if len(input_files_validation) == 0:
             raise ValueError(('There are no files in {}.\n' +
                               'This usually indicates that the channel ({}) was incorrectly specified,\n' +
                               'the data specification in S3 was incorrectly specified or the role specified\n' +
                               'does not have permission to access the data.').format(validation_path, validation_channel))
 
-        raw_data_validation = [ pd.read_csv(file, header=None) for file in input_files_validation ]
+        raw_data_validation = [pd.read_csv(file, header=None) for file in input_files_validation]
         df_val = pd.concat(raw_data_validation)
 
         # Here we only support a single hyperparameter. Note that hyperparameters are always passed in as
         # strings, so we need to do any necessary conversions.
+        n_epochs = trainingParams.get('n_epochs', None)
+        if n_epochs is not None:
+            n_epochs = int(n_epochs)
+
         rank = trainingParams.get('rank', None)
         if rank is not None:
             rank = int(rank)
@@ -72,20 +77,21 @@ def train():
         n_user = df_train.iloc[:, 0].max()
         n_movie = df_train.iloc[:, 1].max()
 
-        print(n_user)
-        print(n_movie)
-        print(type(n_user))
-        print(type(n_movie))
-
         x_train = [list(df_train.iloc[:, 0]), list(df_train.iloc[:, 1])]
         y_train = list(df_train.iloc[:, 2])
+
+        scaler = StandardScaler()
+        scaler.fit(np.array(y_train).reshape(-1, 1))
+        y_train = scaler.transform(np.array(y_train).reshape(-1, 1)).flatten().tolist()
 
         x_val = [list(df_val.iloc[:, 0]), list(df_val.iloc[:, 1])]
         y_val = list(df_val.iloc[:, 2])
 
+        y_val = scaler.transform(np.array(y_val).reshape(-1, 1)).flatten().tolist()
+
         # Now use the keras DeepFactorization model
         model = DeepFactorization(n_user, n_movie, rank, n_hidden)
-        model.train(x_train, y_train, epochs=1, verbose=1, batch_size=1000)
+        model.train(x_train, y_train, epochs=n_epochs, verbose=1, batch_size=1000)
 
         mse = model.evaluate(x_val, y_val)
 
@@ -105,6 +111,7 @@ def train():
         print('Exception during training: ' + str(e) + '\n' + trc, file=sys.stderr)
         # A non-zero exit code causes the training job to be marked as Failed.
         sys.exit(255)
+
 
 if __name__ == '__main__':
     train()

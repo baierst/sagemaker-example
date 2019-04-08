@@ -1,5 +1,6 @@
 import keras
 import keras.backend as K
+from keras.callbacks import EarlyStopping
 import json
 import os
 
@@ -125,8 +126,9 @@ class SimpleFactorization:
         Returns:
             keras.callbacks.History -- History of the training
         """
+        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=2)
 
-        history = self.model.fit(train_x, train_y, **keras_params)
+        history = self.model.fit(train_x, train_y, validation_split=0.1, callbacks=[es], **keras_params)
 
         return history
 
